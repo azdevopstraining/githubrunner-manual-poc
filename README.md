@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Terraform CI/CD (from the Bicep pipeline)
 
 This folder is a Terraform translation of the Bicep GitHub Actions layout in `containerapp-jobs-poc-githubrunner`.
@@ -116,3 +117,6 @@ terraform apply -var-file=params/dev.tfvars
 Keep `TERRAFORM_VERSION` / `AZURERM_PROVIDER_VERSION` in the workflow in sync with `required_providers` in `versions.tf`.
 
 Checkov uses the same skips as the Bicep workflow, plus `CKV2_AZURE_1` (CMK) and `CKV2_AZURE_33` (private endpoint). The Bicep storage module also does not deploy those.
+=======
+##
+>>>>>>> 5d41da0a220488abf17bd2cfcaec63d3640b81cb
