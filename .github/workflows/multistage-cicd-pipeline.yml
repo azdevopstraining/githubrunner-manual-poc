@@ -3,6 +3,11 @@ name: 'Terraform CI/CD'
 ## PRs run fmt, validate, Checkov, and plan. They do not run terraform apply.
 # Merge (or push) to main and manual runs also apply the Terraform configuration.
 #
+# Runner: Container Apps job github-actions-runner-job, label ci, repo-scoped
+# to azdevopstraining/terraform-poc. azdevopstraining is a user account, so
+# org-level registration 404s. Do not use ubuntu-latest or self-hosted.
+# Do not use Docker container actions.
+#
 # Secrets: GitHub Environments named exactly dev, staging, production.
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID — OIDC login (required)
 #   TF_STATE_RESOURCE_GROUP, TF_STATE_STORAGE_ACCOUNT — Azure Storage backend (required)
@@ -49,7 +54,8 @@ jobs:
     # bridgecrewio/checkov-action). They fail with:
     # Cannot connect to the Docker daemon at unix:///var/run/docker.sock
     # setup-python has no builds for this runner OS (actions-runner 2.304 / Ubuntu 20.04).
-    # Tools are downloaded from GitHub Releases (already allowed by the firewall).
+    # uv comes from GitHub Releases. Terraform and the AzureRM provider come from
+    # releases.hashicorp.com (GitHub no longer attaches those zip assets).
     - name: Install CI tools
       run: bash scripts/install-ci-tools.sh
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install Python (uv), Terraform CLI, and the azurerm provider from GitHub Releases.
-# Container Apps jobs have no Docker daemon and often cannot reach registry.terraform.io
-# or releases.hashicorp.com. GitHub Releases are already allowed by the firewall.
+# Install Python (uv), Terraform CLI, and the azurerm provider.
+# Terraform zip assets are no longer attached to GitHub Releases (404).
+# Official binaries come from releases.hashicorp.com. uv still comes from GitHub.
 set -euo pipefail
 
 bin_dir="${HOME}/.local/bin"
@@ -39,9 +39,17 @@ with zipfile.ZipFile(sys.argv[1]) as zf:
 PY
 }
 
+download() {
+  local url="$1"
+  local dest="$2"
+  echo "Downloading ${url}"
+  curl -fL --retry 3 --retry-delay 2 -o "${dest}" "${url}"
+}
+
 if ! command -v terraform >/dev/null 2>&1 || ! terraform version | grep -q "Terraform v${TERRAFORM_VERSION}"; then
-  curl -fsSL "https://github.com/hashicorp/terraform/releases/download/v${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
-    -o /tmp/terraform.zip
+  download \
+    "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+    /tmp/terraform.zip
   rm -rf /tmp/terraform-cli
   extract_zip /tmp/terraform.zip /tmp/terraform-cli
   install -m 0755 /tmp/terraform-cli/terraform "${bin_dir}/terraform"
@@ -52,8 +60,9 @@ mirror_dir="${HOME}/.terraform.d/plugins/registry.terraform.io/hashicorp/azurerm
 provider_bin="${mirror_dir}/terraform-provider-azurerm_v${AZURERM_PROVIDER_VERSION}"
 if [ ! -x "${provider_bin}" ]; then
   mkdir -p "${mirror_dir}"
-  curl -fsSL "https://github.com/hashicorp/terraform-provider-azurerm/releases/download/v${AZURERM_PROVIDER_VERSION}/terraform-provider-azurerm_${AZURERM_PROVIDER_VERSION}_linux_amd64.zip" \
-    -o /tmp/azurerm.zip
+  download \
+    "https://releases.hashicorp.com/terraform-provider-azurerm/${AZURERM_PROVIDER_VERSION}/terraform-provider-azurerm_${AZURERM_PROVIDER_VERSION}_linux_amd64.zip" \
+    /tmp/azurerm.zip
   rm -rf /tmp/azurerm-provider
   extract_zip /tmp/azurerm.zip /tmp/azurerm-provider
   src="$(find /tmp/azurerm-provider -type f -name 'terraform-provider-azurerm*' | head -n 1)"
