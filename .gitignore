@@ -1,0 +1,15 @@
+.terraform/
+.terraformrc.ci
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.txt
+whatif
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+results.sarif
+results_sarif.sarif
