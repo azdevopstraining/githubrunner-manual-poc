@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Install Python (uv), Terraform CLI, and the azurerm provider.
+# Install Python (uv), Terraform CLI, the azurerm provider, and optionally Azure CLI.
 # Terraform zip assets are no longer attached to GitHub Releases (404).
 # Official binaries come from releases.hashicorp.com. uv still comes from GitHub.
+# azure/login needs the az binary on PATH; this runner image does not ship it.
 set -euo pipefail
 
 bin_dir="${HOME}/.local/bin"
@@ -13,6 +14,8 @@ fi
 
 TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.10.5}"
 AZURERM_PROVIDER_VERSION="${AZURERM_PROVIDER_VERSION:-4.37.0}"
+INSTALL_AZURE_CLI="${INSTALL_AZURE_CLI:-false}"
+export UV_TOOL_BIN_DIR="${bin_dir}"
 
 if ! command -v uv >/dev/null 2>&1; then
   curl -fsSL "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz" \
@@ -85,4 +88,12 @@ EOF
 export TF_CLI_CONFIG_FILE="${tf_rc}"
 if [ -n "${GITHUB_ENV:-}" ]; then
   echo "TF_CLI_CONFIG_FILE=${tf_rc}" >> "${GITHUB_ENV}"
+fi
+
+if [ "${INSTALL_AZURE_CLI}" = "true" ]; then
+  if ! command -v az >/dev/null 2>&1; then
+    echo "Installing Azure CLI via uv (no Docker / no apt)"
+    uv tool install azure-cli
+  fi
+  az version
 fi
