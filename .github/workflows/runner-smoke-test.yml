@@ -1,0 +1,59 @@
+name: Container Apps runner smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Verify private Container Apps runner
+    runs-on: [ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Show runner information
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner name: ${RUNNER_NAME}"
+          echo "Runner OS: ${RUNNER_OS}"
+          echo "Runner architecture: ${RUNNER_ARCH}"
+          uname -a
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify GitHub API access through firewall
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --header "Accept: application/vnd.github+json" \
+            https://api.github.com/rate_limit >/dev/null
+          echo "GitHub API is reachable."
+
+      - name: Verify private ACR DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          getent ahostsv4 azdtghrunnerfwacr.azurecr.io
+          private_ip="$(getent ahostsv4 azdtghrunnerfwacr.azurecr.io | awk 'NR == 1 { print $1 }')"
+          case "$private_ip" in
+            10.30.*)
+              echo "ACR resolves privately to $private_ip."
+              ;;
+            *)
+              echo "::error::ACR resolved to unexpected address: $private_ip"
+              exit 1
+              ;;
+          esac
+
+      - name: Confirm workspace checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse --short HEAD
+          test -f .github/workflows/runner-smoke-test.yml
+          echo "Runner smoke test completed successfully."

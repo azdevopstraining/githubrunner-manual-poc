@@ -3,8 +3,8 @@ name: 'Terraform CI/CD'
 ## PRs run fmt, validate, Checkov, and plan. They do not run terraform apply.
 # Merge (or push) to main and manual runs also apply the Terraform configuration.
 #
-# Runner: Container Apps job github-actions-runner-job, label ci, repo-scoped
-# to azdevopstraining/terraform-poc. azdevopstraining is a user account, so
+# Runner: Container Apps job github-actions-runner-job-fw, label ci, repo-scoped
+# to azdevopstraining/githubrunner-manual-poc. azdevopstraining is a user account, so
 # org-level registration 404s. Do not use ubuntu-latest or self-hosted.
 # Do not use Docker container actions.
 #
