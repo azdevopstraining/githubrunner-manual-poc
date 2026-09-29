@@ -1,6 +1,6 @@
 name: 'Terraform CI/CD'
 
-## PRs run fmt, validate, Checkov, and plan. They do not run terraform apply.
+# PRs run fmt, validate, Checkov, and plan. They do not run terraform apply.
 # Merge (or push) to main and manual runs also apply the Terraform configuration.
 #
 # Runner: Container Apps job github-actions-runner-job-fw, label ci, repo-scoped
