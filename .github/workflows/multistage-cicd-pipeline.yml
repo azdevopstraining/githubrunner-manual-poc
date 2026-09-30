@@ -1,26 +1,21 @@
 name: 'Terraform CI/CD'
 
-## PRs run fmt, validate, Checkov, and plan. They do not run terraform apply.
-# Merge (or push) to main and manual runs also apply the Terraform configuration.
+# Manual runs only. Actions → Terraform CI/CD → Run workflow, then choose
+# dev, staging, or production.
 #
-# Runner: Container Apps job github-actions-runner-job-fw, label ci, repo-scoped
-# to azdevopstraining/githubrunner-manual-poc. azdevopstraining is a user account, so
-# org-level registration 404s. Do not use ubuntu-latest or self-hosted.
-# Do not use Docker container actions.
+# One job so checkout and tool install run once. Lint steps are named
+# "Lint — ..." and run before plan and apply.
+# If the GitHub Environment has required reviewers, that approval happens
+# before the job starts, including the lint steps.
 #
-# Secrets: GitHub Environments named exactly dev, staging, production.
-#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID — OIDC login (required)
-#   TF_STATE_RESOURCE_GROUP, TF_STATE_STORAGE_ACCOUNT — Azure Storage backend (required)
-#   TF_STATE_CONTAINER — optional, defaults to tfstate
-#   STORAGE_ACCOUNT_NAME — optional override of params/*.tfvars
-# Do not put passwords or tokens in params/*.tfvars.
+# Runner: Container Apps job, label ci. No Docker container actions
+# (this image has no Docker daemon).
+# Secrets live on GitHub Environments named dev, staging, and production:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   TF_STATE_RESOURCE_GROUP, TF_STATE_STORAGE_ACCOUNT
+#   TF_STATE_CONTAINER (optional, defaults to tfstate)
+
 on:
-  push:
-    branches:
-    - main
-  pull_request:
-    branches:
-    - main
   workflow_dispatch:
     inputs:
       environment:
@@ -39,96 +34,40 @@ env:
 permissions:
   id-token: write
   contents: read
-  pull-requests: write
 
 jobs:
-  lint-and-scan:
-    name: 'Lint and security scan'
-    # Custom label "ci" so only this Container Apps job pool picks it up.
+  cicd:
+    name: 'Lint and deploy ${{ inputs.environment }}'
     runs-on: [ci]
+    environment: ${{ inputs.environment }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_STATE_RESOURCE_GROUP: ${{ secrets.TF_STATE_RESOURCE_GROUP }}
+      TF_STATE_STORAGE_ACCOUNT: ${{ secrets.TF_STATE_STORAGE_ACCOUNT }}
+      TF_STATE_CONTAINER: ${{ secrets.TF_STATE_CONTAINER }}
+      TF_VAR_FILE: params/${{ inputs.environment == 'production' && 'prod' || inputs.environment }}.tfvars
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
-    # Container Apps jobs have no Docker daemon. Do not use Docker container
-    # actions here (hashicorp/setup-terraform with a container, azure/cli@v2,
-    # bridgecrewio/checkov-action). They fail with:
-    # Cannot connect to the Docker daemon at unix:///var/run/docker.sock
-    # setup-python has no builds for this runner OS (actions-runner 2.304 / Ubuntu 20.04).
-    # uv comes from GitHub Releases. Terraform and the AzureRM provider come from
-    # releases.hashicorp.com (GitHub no longer attaches those zip assets).
     - name: Install CI tools
+      env:
+        INSTALL_AZURE_CLI: "true"
       run: bash scripts/install-ci-tools.sh
 
-    - name: Terraform fmt
+    - name: Lint — terraform fmt
       run: terraform fmt -check -recursive
 
-    - name: Terraform init (no backend)
-      run: terraform init -backend=false -input=false
-
-    - name: Terraform Validate
-      run: terraform validate -no-color
-
-    - name: Run Checkov
-      id: checkov
+    - name: Lint — Checkov
       run: |
         uv tool install "checkov==3.3.17"
         checkov -d . \
           --framework terraform \
-          --skip-check CKV_AZURE_33,CKV2_AZURE_21,CKV_AZURE_43,CKV_AZURE_206,CKV2_AZURE_1,CKV2_AZURE_33 \
-          --output cli \
-          --output sarif \
-          --output-file-path .
-        if [ -f results_sarif.sarif ]; then
-          mv -f results_sarif.sarif results.sarif
-        fi
+          --skip-check CKV_AZURE_33,CKV2_AZURE_21,CKV_AZURE_43,CKV_AZURE_206,CKV2_AZURE_1,CKV2_AZURE_33
 
-    - name: Upload Checkov SARIF artifact
-      if: success() || failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: checkov-sarif
-        path: results.sarif
-        if-no-files-found: warn
-
-  # Plan against dev, then deploy (on merge to main or manual run).
-  # OIDC subject: repo:ORG/REPO:environment:dev
-  preview-dev:
-    name: 'Validate and plan (dev)'
-    needs: [lint-and-scan]
-    runs-on: [ci]
-    environment: dev
-    env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_STATE_RESOURCE_GROUP: ${{ secrets.TF_STATE_RESOURCE_GROUP }}
-      TF_STATE_STORAGE_ACCOUNT: ${{ secrets.TF_STATE_STORAGE_ACCOUNT }}
-      TF_STATE_CONTAINER: ${{ secrets.TF_STATE_CONTAINER }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Check Azure OIDC secrets
-      run: |
-        if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] || [ -z "${{ secrets.AZURE_TENANT_ID }}" ] || [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
-          echo "::error::GitHub Environment 'dev' is missing AZURE_CLIENT_ID, AZURE_TENANT_ID, or AZURE_SUBSCRIPTION_ID. Add them under Settings → Environments → dev."
-          exit 1
-        fi
-
-    - name: Check Terraform state backend secrets
-      run: |
-        if [ -z "${TF_STATE_RESOURCE_GROUP}" ] || [ -z "${TF_STATE_STORAGE_ACCOUNT}" ]; then
-          echo "::error::GitHub Environment 'dev' is missing TF_STATE_RESOURCE_GROUP or TF_STATE_STORAGE_ACCOUNT. Add them under Settings → Environments → dev. TF_STATE_CONTAINER is optional and defaults to tfstate."
-          exit 1
-        fi
-
-    - name: Install CI tools
-      env:
-        INSTALL_AZURE_CLI: "true"
-      run: bash scripts/install-ci-tools.sh
-
-    - name: 'Az CLI login'
+    - name: Az CLI login
       uses: azure/login@v3
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -141,166 +80,15 @@ jobs:
           -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
           -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
           -backend-config="container_name=${TF_STATE_CONTAINER:-tfstate}" \
-          -backend-config="key=dev.terraform.tfstate" \
+          -backend-config="key=${{ inputs.environment }}.terraform.tfstate" \
           -backend-config="use_azuread_auth=true" \
           -backend-config="use_oidc=true"
 
-    - name: Terraform Plan
-      env:
-        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
-      run: |
-        extra=()
-        if [ -n "${STORAGE_ACCOUNT_NAME:-}" ]; then
-          extra+=(-var "storage_account_name=${STORAGE_ACCOUNT_NAME}")
-        fi
-        terraform plan \
-          -input=false \
-          -no-color \
-          -var-file=params/dev.tfvars \
-          "${extra[@]}" \
-          -out=tfplan
-        terraform show -no-color tfplan > plan.txt
+    - name: Lint — terraform validate
+      run: terraform validate -no-color
 
-    - name: Create String Output
-      id: plan-string
-      run: |
-        PLAN=$(cat plan.txt)
+    - name: Terraform plan
+      run: terraform plan -input=false -no-color -var-file="${TF_VAR_FILE}" -out=tfplan
 
-        delimiter="$(openssl rand -hex 8)"
-        echo "summary<<${delimiter}" >> $GITHUB_OUTPUT
-        echo "## Terraform plan (dev)" >> $GITHUB_OUTPUT
-        echo "<details><summary>Click to expand</summary>" >> $GITHUB_OUTPUT
-        echo "" >> $GITHUB_OUTPUT
-        echo '```' >> $GITHUB_OUTPUT
-        echo "$PLAN" >> $GITHUB_OUTPUT
-        echo '```' >> $GITHUB_OUTPUT
-        echo "</details>" >> $GITHUB_OUTPUT
-        echo "${delimiter}" >> $GITHUB_OUTPUT
-
-    - name: Publish Plan to Task Summary
-      env:
-        SUMMARY: ${{ steps.plan-string.outputs.summary }}
-      run: |
-        echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
-
-    - name: Push Plan Output to PR
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      env:
-        SUMMARY: "${{ steps.plan-string.outputs.summary }}"
-      with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const body = `${process.env.SUMMARY}`;
-            github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-            })
-
-  # Choose deploy targets (all envs on push to main; one env on manual run).
-  plan-deploy:
-    name: 'Plan deploy targets'
-    needs: [lint-and-scan, preview-dev]
-    runs-on: [ci]
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-    - id: set-matrix
-      env:
-        EVENT_NAME: ${{ github.event_name }}
-        TARGET_ENV: ${{ github.event.inputs.environment }}
-      run: |
-        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-          PARAM="params/${TARGET_ENV}.tfvars"
-          if [ "$TARGET_ENV" = "production" ]; then
-            PARAM="params/prod.tfvars"
-          fi
-          echo "matrix={\"include\":[{\"environment\":\"${TARGET_ENV}\",\"params\":\"${PARAM}\"}]}" >> "$GITHUB_OUTPUT"
-        else
-          echo 'matrix={"include":[{"environment":"dev","params":"params/dev.tfvars"},{"environment":"staging","params":"params/staging.tfvars"},{"environment":"production","params":"params/prod.tfvars"}]}' >> "$GITHUB_OUTPUT"
-        fi
-
-  # On merge to main: deploy dev, then staging, then production (one at a time).
-  # Manual run can target a single environment.
-  # PRs never reach this job — they must not wait on staging/production approvals
-  # or attempt login against environments that have no OIDC secrets.
-  # OIDC subject: repo:ORG/REPO:environment:<name>
-  # Approvals are not set in YAML. Enable Required reviewers on GitHub Environments
-  # named exactly: dev, staging, production (Settings → Environments).
-  deploy:
-    name: 'Deploy ${{ matrix.environment }}'
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: [plan-deploy]
-    runs-on: [ci]
-    environment:
-      name: ${{ matrix.environment }}
-    strategy:
-      fail-fast: true
-      max-parallel: 1
-      matrix: ${{ fromJson(needs.plan-deploy.outputs.matrix) }}
-    env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_STATE_RESOURCE_GROUP: ${{ secrets.TF_STATE_RESOURCE_GROUP }}
-      TF_STATE_STORAGE_ACCOUNT: ${{ secrets.TF_STATE_STORAGE_ACCOUNT }}
-      TF_STATE_CONTAINER: ${{ secrets.TF_STATE_CONTAINER }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Check Azure OIDC secrets
-      run: |
-        if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] || [ -z "${{ secrets.AZURE_TENANT_ID }}" ] || [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
-          echo "::error::GitHub Environment '${{ matrix.environment }}' is missing AZURE_CLIENT_ID, AZURE_TENANT_ID, or AZURE_SUBSCRIPTION_ID. Copy the same three secrets you already have on 'dev' into Settings → Environments → ${{ matrix.environment }}."
-          exit 1
-        fi
-
-    - name: Check Terraform state backend secrets
-      run: |
-        if [ -z "${TF_STATE_RESOURCE_GROUP}" ] || [ -z "${TF_STATE_STORAGE_ACCOUNT}" ]; then
-          echo "::error::GitHub Environment '${{ matrix.environment }}' is missing TF_STATE_RESOURCE_GROUP or TF_STATE_STORAGE_ACCOUNT. Copy the same backend secrets you already have on 'dev' into Settings → Environments → ${{ matrix.environment }}."
-          exit 1
-        fi
-
-    - name: Install CI tools
-      env:
-        INSTALL_AZURE_CLI: "true"
-      run: bash scripts/install-ci-tools.sh
-
-    - name: 'Az CLI login'
-      uses: azure/login@v3
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-    - name: Terraform init
-      run: |
-        terraform init -input=false -reconfigure \
-          -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
-          -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
-          -backend-config="container_name=${TF_STATE_CONTAINER:-tfstate}" \
-          -backend-config="key=${{ matrix.environment }}.terraform.tfstate" \
-          -backend-config="use_azuread_auth=true" \
-          -backend-config="use_oidc=true"
-
-    - name: Terraform Plan (pre-apply)
-      env:
-        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
-      run: |
-        extra=()
-        if [ -n "${STORAGE_ACCOUNT_NAME:-}" ]; then
-          extra+=(-var "storage_account_name=${STORAGE_ACCOUNT_NAME}")
-        fi
-        terraform plan \
-          -input=false \
-          -no-color \
-          -var-file=${{ matrix.params }} \
-          "${extra[@]}" \
-          -out=tfplan
-
-    - name: Terraform Apply
+    - name: Terraform apply
       run: terraform apply -input=false -auto-approve tfplan
