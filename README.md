@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # Terraform CI/CD (from the Bicep pipeline)
 
 This folder is a Terraform translation of the Bicep GitHub Actions layout in `containerapp-jobs-poc-githubrunner`.
