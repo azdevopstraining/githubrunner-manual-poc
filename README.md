@@ -108,7 +108,6 @@ export ARM_SUBSCRIPTION_ID="<subscription-id>"
 terraform init -backend=false
 terraform fmt -check -recursive
 terraform validate
-
 terraform plan -var-file=params/dev.tfvars
 terraform apply -var-file=params/dev.tfvars
 ```
