@@ -1110,4 +1110,3 @@ Appendix B. Portal create shortcuts
 | Route table | Route tables |
 | Environment | Container Apps Environments |
 | Job | Container Apps Jobs |
-
