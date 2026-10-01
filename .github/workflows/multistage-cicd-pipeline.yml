@@ -22,7 +22,7 @@ on:
         description: Target environment
         required: true
         type: choice
-        options: [dev, staging, production]
+        options: [dev, prod]
 
 env:
   TERRAFORM_VERSION: "1.10.5"
