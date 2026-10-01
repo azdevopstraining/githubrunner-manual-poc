@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   cicd:
-    name: 'Lint and deploy ${{ inputs.environment }}'
+    name: 'deploy into ${{ inputs.environment }}'
     runs-on: [ci]
     environment: ${{ inputs.environment }}
     env:
